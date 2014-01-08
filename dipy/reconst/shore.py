@@ -277,13 +277,21 @@ class ShoreFit():
 
         return c_sh
 
-    def odf(self, sphere):
+    def odf(self, sphere, s=0):
         r""" Calculates the ODF for a given discrete sphere.
+
+        Parameters
+        ----------
+        sphere : Sphere,
+            the odf sphere
+        s : unsigned int,
+            sharpening factor
+
         """
         upsilon = self.model.cache_get('shore_matrix_odf', key=sphere)
         if upsilon is None:
             upsilon = shore_matrix_odf(
-                self.radial_order,  self.zeta, sphere.vertices)
+                self.radial_order,  self.zeta, sphere.vertices, s)
             self.model.cache_set('shore_matrix_odf', sphere, upsilon)
 
         odf = np.dot(upsilon, self._shore_coef)
@@ -327,6 +335,44 @@ class ShoreFit():
                 genlaguerre(n, 0.5)(0)
 
         return np.clip(rtop, 0, rtop.max())
+
+    def rtap(self, sphere):
+        r""" Calculates the analytical return to axis probability (RTAP)
+        from the pdf [1]_ in all the directions of the given sphere.
+
+        References
+        ----------
+        .. [1] Ozarslan E. et. al, "Mean apparent propagator (MAP) MRI: A novel
+        diffusion imaging method for mapping tissue microstructure",
+        NeuroImage, 2013.
+        """
+        rtap_matrix = self.model.cache_get('shore_matrix_rtap', key=sphere)
+        if rtap_matrix is None:
+            rtap_matrix = shore_matrix_rtap(self.radial_order,
+                                            self.zeta, sphere.vertices)
+            self.model.cache_set('shore_matrix_rtap', sphere, rtap_matrix)
+
+        rtap = np.dot(rtap_matrix, self._shore_coef)
+        return np.clip(rtap, 0, rtap.max())
+
+    def rtpp(self, sphere):
+        r""" Calculates the analytical return to plane probability (RTPP)
+        from the pdf [1]_ in all the directions of the given sphere.
+
+        References
+        ----------
+        .. [1] Ozarslan E. et. al, "Mean apparent propagator (MAP) MRI: A novel
+        diffusion imaging method for mapping tissue microstructure",
+        NeuroImage, 2013.
+        """
+        rtpp_matrix = self.model.cache_get('shore_matrix_rtpp', key=sphere)
+        if rtpp_matrix is None:
+            rtpp_matrix = shore_matrix_rtpp(self.radial_order,
+                                            self.zeta, sphere.vertices)
+            self.model.cache_set('shore_matrix_rtpp', sphere, rtpp_matrix)
+
+        rtpp = np.dot(rtpp_matrix, self._shore_coef)
+        return np.clip(rtpp, 0, rtpp.max())
 
     def msd(self):
         r""" Calculates the analytical mean squared displacement (MSD) [1]_
@@ -475,7 +521,46 @@ def _kappa_pdf(zeta, n, l):
     return np.sqrt((16 * np.pi ** 3 * zeta ** 1.5 * factorial(n - l)) / gamma(n + 1.5))
 
 
-def shore_matrix_odf(radial_order, zeta, sphere_vertices):
+def shore_matrix_odf(radial_order, zeta, sphere_vertices, s=0):
+    r"""Compute the SHORE ODF matrix [1]_"
+
+    Parameters
+    ----------
+    radial_order : unsigned int,
+        an even integer that represent the order of the basis
+    zeta : unsigned int,
+        scale factor
+    sphere_vertices : array, shape (N,3)
+        vertices of the odf sphere
+    s : unsigned int,
+        sharpening factor
+
+    References
+    ----------
+    .. [1] Merlet S. et. al, "Continuous diffusion signal, EAP and
+    ODF estimation via Compressive Sensing in diffusion MRI", Medical
+    Image Analysis, 2013.
+    """
+
+    r, theta, phi = cart2sphere(sphere_vertices[:, 0], sphere_vertices[:, 1],
+                                sphere_vertices[:, 2])
+    theta[np.isnan(theta)] = 0
+    F = radial_order / 2
+    n_c = np.round(1 / 6.0 * (F + 1) * (F + 2) * (4 * F + 3))
+    upsilon = np.zeros((len(sphere_vertices), n_c))
+    counter = 0
+    for l in range(0, radial_order + 1, 2):
+        for n in range(l, int((radial_order + l) / 2) + 1):
+            for m in range(-l, l + 1):
+                upsilon[:, counter] = (-1) ** (n - l / 2.0) * np.sqrt((gamma(l / 2.0 +s/2.0+ 1.5) ** 2 * gamma(n + 1.5) * 2 ** (l +s+ 3)) /\
+                (16 * np.pi ** 3 * (zeta) ** 1.5 * factorial(n - l) * gamma(l + 1.5) ** 2 *(4*np.pi**2 *zeta)**s) ) *\
+                hyp2f1(l - n, l / 2.0 + 1.5 +s/2.0, l + 1.5, 2.0) * \
+                real_sph_harm(m, l, theta, phi)
+                counter += 1
+
+    return upsilon
+
+def shore_matrix_rtap(radial_order, zeta, sphere_vertices):
     r"""Compute the SHORE ODF matrix [1]_"
 
     Parameters
@@ -499,22 +584,53 @@ def shore_matrix_odf(radial_order, zeta, sphere_vertices):
     theta[np.isnan(theta)] = 0
     F = radial_order / 2
     n_c = np.round(1 / 6.0 * (F + 1) * (F + 2) * (4 * F + 3))
-    upsilon = np.zeros((len(sphere_vertices), n_c))
+    rtap_matrix = np.zeros((len(sphere_vertices), n_c))
     counter = 0
     for l in range(0, radial_order + 1, 2):
         for n in range(l, int((radial_order + l) / 2) + 1):
             for m in range(-l, l + 1):
-                upsilon[:, counter] = (-1) ** (n - l / 2.0) * _kappa_odf(zeta, n, l) * \
-                    hyp2f1(l - n, l / 2.0 + 1.5, l + 1.5, 2.0) * \
-                    real_sph_harm(m, l, theta, phi)
+                rtap_matrix[:,counter]= hyp2f1(l - n, l / 2.0 + 1.5, l + 1.5, 2.0) * \
+                    real_sph_harm(m, l, theta, phi) * ((-1)**(l/2))*(factorial(l)/((2* factorial(l/2))**2)) * \
+                    np.sqrt((zeta**1.5 * 2**l * 16* np.pi**2 * gamma(l/2 +1.5)**2 * gamma(n+1.5)) / (factorial(n-l) * gamma(l +1.5)**2 ))
                 counter += 1
 
-    return upsilon
+    return rtap_matrix
 
+def shore_matrix_rtpp(radial_order, zeta, sphere_vertices):
+    r"""Compute the SHORE ODF matrix [1]_"
 
-def _kappa_odf(zeta, n, l):
-    return np.sqrt((gamma(l / 2.0 + 1.5) ** 2 * gamma(n + 1.5) * 2 ** (l + 3)) /
-                   (16 * np.pi ** 3 * (zeta) ** 1.5 * factorial(n - l) * gamma(l + 1.5) ** 2))
+    Parameters
+    ----------
+    radial_order : unsigned int,
+        an even integer that represent the order of the basis
+    zeta : unsigned int,
+        scale factor
+    sphere_vertices : array, shape (N,3)
+        vertices of the odf sphere
+
+    References
+    ----------
+    .. [1] Merlet S. et. al, "Continuous diffusion signal, EAP and
+    ODF estimation via Compressive Sensing in diffusion MRI", Medical
+    Image Analysis, 2013.
+    """
+
+    r, theta, phi = cart2sphere(sphere_vertices[:, 0], sphere_vertices[:, 1],
+                                sphere_vertices[:, 2])
+    theta[np.isnan(theta)] = 0
+    F = radial_order / 2
+    n_c = np.round(1 / 6.0 * (F + 1) * (F + 2) * (4 * F + 3))
+    rtpp_matrix = np.zeros((len(sphere_vertices), n_c))
+    counter = 0
+    for l in range(0, radial_order + 1, 2):
+        for n in range(l, int((radial_order + l) / 2) + 1):
+            for m in range(-l, l + 1):
+                rtpp_matrix[:,counter]= hyp2f1(l - n, l / 2.0 + 1.5, l + 1.5, 2.0) * \
+                    real_sph_harm(m, l, theta, phi) * \
+                    np.sqrt((zeta**1.5 * 2**l * 4* gamma(l/2 +1.5)**2 * gamma(n+1.5)) / (factorial(n-l) * gamma(l +1.5)**2 ))
+                counter += 1
+
+    return rtpp_matrix
 
 
 def l_shore(radial_order):
