@@ -170,34 +170,37 @@ class ShoreModel(Cache):
         if self.positiveness:
             F = self.radial_order / 2
             n_c = np.round(1 / 6.0 * (F + 1) * (F + 2) * (4 * F + 3))
-            psi = self.cache_get('shore_matrix_pdf', key=gridsize)
-            if psi is None:
-                v,t = create_rspace(11, 40e-3)
-                psi = shore_matrix_pdf(self.radial_order,  self.zeta, t)
-                self.cache_set('shore_matrix_pdf', gridsize, psi)
-            G=matrix(-1*psi)
-            print(psi.shape[0])
-            Q=matrix(np.dot(M.T,M)+ self.lambdaN * Nshore + self.lambdaL * Lshore)
+            G = self.cache_get('shore_matrix_G', key=gridsize)
+            if G is None:
+                v,t = create_rspace(11, 20e-3)
+                psi = shore_matrix_pdf(self.radial_order,  self.zeta, t[:665])#2456])
+                G=matrix(-1*psi)
+                self.cache_set('shore_matrix_G', gridsize, G)
+
+            Q = self.cache_get('shore_matrix_Q', key=self.radial_order)
+            if Q is None:
+                Q=matrix(np.dot(M.T,M)+ self.lambdaN * Nshore + self.lambdaL * Lshore)
+                self.cache_set('shore_matrix_Q', self.radial_order, Q)
+
             c=matrix(-1*np.dot(M.T,data))
-            h=matrix((1e-10)*np.ones((psi.shape[0])),(psi.shape[0],1))
-            E=matrix(M[0],(1,M.shape[1]))
-            d=matrix(data[0])
-            print(Q.size)
-            print(G.size)
-            sol=solvers.qp(Q,c,G,h,E,d)
+            h=matrix((1e-10)*np.ones((665)),(665,1))
+            #E=matrix(M[0],(1,M.shape[1]))
+            #d=matrix(data[0])
+            solvers.options['show_progress'] = False
+            sol=solvers.qp(Q,c,G,h)#,E,d)
             coef=np.array(sol['x'])[:,0]
 
         else:
             pseudoInv = np.dot(np.linalg.inv(np.dot(M.T, M) + self.lambdaN * Nshore + self.lambdaL * Lshore), M.T)
             coef = np.dot(pseudoInv, data)
 
-            signal_0 = 0
+        signal_0 = 0
 
-            for n in range(int(self.radial_order / 2) + 1):
-                signal_0 += coef[n] * genlaguerre(n, 0.5)(0) * \
-                    ((factorial(n)) / (2 * np.pi * (self.zeta ** 1.5) * gamma(n + 1.5))) ** 0.5
+        for n in range(int(self.radial_order / 2) + 1):
+            signal_0 += coef[n] * genlaguerre(n, 0.5)(0) * \
+                ((factorial(n)) / (2 * np.pi * (self.zeta ** 1.5) * gamma(n + 1.5))) ** 0.5
 
-            coef = coef / signal_0
+        coef = coef / signal_0
 
         return ShoreFit(self, coef)
 
@@ -372,7 +375,8 @@ class ShoreFit():
             self.model.cache_set('shore_matrix_rtap', sphere, rtap_matrix)
 
         rtap = np.dot(rtap_matrix, self._shore_coef)
-        return rtap
+        odf=self.odf(sphere) 
+        return rtap[odf.argmax()]
 
     def rtpp(self, sphere):
         r""" Calculates the analytical return to plane probability (RTPP)
@@ -391,7 +395,8 @@ class ShoreFit():
             self.model.cache_set('shore_matrix_rtpp', sphere, rtpp_matrix)
 
         rtpp = np.dot(rtpp_matrix, self._shore_coef)
-        return rtpp
+        odf=self.odf(sphere) 
+        return rtpp[odf.argmax()]
 
     def msd(self):
         r""" Calculates the analytical mean squared displacement (MSD) [1]_
@@ -419,6 +424,54 @@ class ShoreFit():
 
         return msd
 
+    def propagator_gaussianity(self, dissimilarity=False):
+        r""" Calculates the analytical mean squared displacement (MSD) [1]_
+
+        ..math::
+            :nowrap:
+                \begin{equation}
+                    MSD:{DSI}=\int_{-\infty}^{\infty}\int_{-\infty}^{\infty}\int_{-\infty}^{\infty} P(\hat{\mathbf{r}}) \cdot \hat{\mathbf{r}}^{2} \ dr_x \ dr_y \ dr_z
+                \end{equation}
+
+        where $\hat{\mathbf{r}}$ is a point in the 3D propagator space (see Wu et. al [1]_).
+
+        References
+        ----------
+        .. [1] Wu Y. et. al, "Hybrid diffusion imaging", NeuroImage, vol 36,
+        p. 617-629, 2007.
+        """
+        c = self._shore_coef
+        costheta= c[0] / (np.sqrt((c**2).sum()))
+        if dissimilarity:
+            g = np.sqrt(1 - costheta**2)
+        else:
+            g = costheta
+        return g
+
+    def propagator_isotropy(self, dissimilarity=False):
+        r""" Calculates the analytical mean squared displacement (MSD) [1]_
+
+        ..math::
+            :nowrap:
+                \begin{equation}
+                    MSD:{DSI}=\int_{-\infty}^{\infty}\int_{-\infty}^{\infty}\int_{-\infty}^{\infty} P(\hat{\mathbf{r}}) \cdot \hat{\mathbf{r}}^{2} \ dr_x \ dr_y \ dr_z
+                \end{equation}
+
+        where $\hat{\mathbf{r}}$ is a point in the 3D propagator space (see Wu et. al [1]_).
+
+        References
+        ----------
+        .. [1] Wu Y. et. al, "Hybrid diffusion imaging", NeuroImage, vol 36,
+        p. 617-629, 2007.
+        """
+        c = self._shore_coef
+        k = int(self.radial_order / 2) + 1
+        costheta= (c[0:k]**2).sum() / ((np.sqrt((c[0:k]**2).sum())) * (np.sqrt((c**2).sum())))
+        if dissimilarity:
+            g = np.sqrt(1 - costheta**2)
+        else:
+            g = costheta
+        return g
     @property
     def shore_coeff(self):
         """The SHORE coefficients
