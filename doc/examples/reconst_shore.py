@@ -5,7 +5,8 @@ Continuous and analytical diffusion signal modelling with 3D-SHORE
 
 We show how to model the diffusion signal as a linear combination
 of continuous functions from the SHORE basis [Merlet2013]_.
-We also compute the analytical Orientation Distribution Function (ODF).
+We also compute the analytical Orientation Distribution Function (ODF)
+and its sharpened version [Ozarslan2013]_.
 
 First import the necessary modules:
 """
@@ -88,6 +89,22 @@ fvtk.add(r, sfu)
 fvtk.record(r, n_frames=1, out_path='odfs.png', size=(600, 600))
 
 """
+It is also possible to add a sharpening factor in the calculus of the ODFs.
+"""
+
+odf_s = asmfit.odf(sphere, s=4)
+
+"""
+Display the sharpened ODFs
+"""
+
+r = fvtk.ren()
+sfu = fvtk.sphere_funcs(odf_s[:, None, :], sphere, colormap='jet')
+sfu.RotateX(-90)
+fvtk.add(r, sfu)
+fvtk.record(r, n_frames=1, out_path='odfs_sharp.png', size=(600, 600))
+
+"""
 .. figure:: odfs.png
    :align: center
 
@@ -97,6 +114,10 @@ fvtk.record(r, n_frames=1, out_path='odfs.png', size=(600, 600))
 				estimation via Compressive Sensing in diffusion MRI", Medical
 				Image Analysis, 2013.
 
+.. [Ozarslan2013] Ozarslan E. et. al, "Mean apparent propagator (MAP) MRI: A novel
+        			diffusion imaging method for mapping tissue microstructure",
+        			NeuroImage, vol 78, p. 16-32, 2013.
+        			
 .. [Cheng2011] Cheng J. et. al , "Theoretical Analysis and Pratical Insights
 			   on EAP Estimation via Unified HARDI Framework", MICCAI
 			   workshop workshop on Computational Diffusion MRI, 2011.

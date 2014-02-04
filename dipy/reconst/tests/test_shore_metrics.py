@@ -41,18 +41,30 @@ def test_shore_metrics():
     zeta = 700
     lambdaN = 1e-12
     lambdaL = 1e-12
+
+    # no constrain
     asm = ShoreModel(gtab, radial_order=radial_order,
                      zeta=zeta, lambdaN=lambdaN, lambdaL=lambdaL)
     asmfit = asm.fit(S)
     c_shore = asmfit.shore_coeff
-
     cmat = shore_matrix(radial_order, zeta, gtab)
     S_reconst = np.dot(cmat, c_shore)
+
+    # positive constrain
+    asm_pos = ShoreModel(gtab, radial_order=radial_order,
+                     zeta=zeta, lambdaN=lambdaN, lambdaL=lambdaL, positiveness=True)
+    asmfit_pos = asm_pos.fit(S)
+    c_shore_pos = asmfit_pos.shore_coeff
+
+    S_reconst_pos = np.dot(cmat, c_shore_pos)
 
     # test the signal reconstruction
     S = S / S[0]
     nmse_signal = np.sqrt(np.sum((S - S_reconst) ** 2)) / (S.sum())
     assert_almost_equal(nmse_signal, 0.0, 4)
+
+    nmse_signal_pos = np.sqrt(np.sum((S - S_reconst_pos) ** 2)) / (S.sum())
+    assert_almost_equal(nmse_signal_pos, 0.0, 3)
 
     # test if the analytical integral of the pdf is equal to one
     integral = 0
@@ -61,10 +73,26 @@ def test_shore_metrics():
 
     assert_almost_equal(integral, 1.0, 10)
 
+    # test if the analytical integral of the positive pdf is equal to one
+    integral = 0
+    for n in range(int((radial_order)/2 +1)):
+        integral += c_shore_pos[n] * (np.pi**(-1.5) * zeta **(-1.5) * genlaguerre(n,0.5)(0)) ** 0.5
+
+    assert_almost_equal(integral, 1.0, 10)
+
     # test if the integral of the pdf calculated on a discrete grid is equal to one
-    pdf_discrete = asmfit.pdf_grid(17, 40e-3)
+    pdf_discrete = asmfit.pdf_grid(17, 30e-3)
     integral = pdf_discrete.sum()
     assert_almost_equal(integral, 1.0, 1)
+    
+    # test if the integral of the positive pdf calculated on a discrete grid is equal to one
+    pdf_discrete = asmfit_pos.pdf_grid(17, 30e-3)
+    integral = pdf_discrete.sum()
+    assert_almost_equal(integral, 1.0, 1)
+
+    # test the positiveness of the propagator
+    negative_values = pdf_discrete[pdf_discrete < 0].sum()
+    assert_almost_equal(negative_values, 0, 2)
 
     # compare the shore pdf with the ground truth multi_tensor pdf
 
@@ -88,6 +116,19 @@ def test_shore_metrics():
     msd_mt = multi_tensor_msd([.5, .5], mevals=mevals)
     msd_shore = asmfit.msd()
     assert_equal(msd_mt / msd_shore < 1.05 and msd_mt / msd_shore > 0.95, True)
+
+    # test non-gaussianity with an isotropic voxel
+    mevals = np.array(([0.0007, 0.0007, 0.0007],
+                       [0.0007, 0.0007, 0.0007]))
+    angl = [(0, 0), (0, 0)]
+    S, sticks = MultiTensor(gtab, mevals, S0=100.0, angles=angl,
+                            fractions=[50, 50], snr=None)
+    asm_iso = ShoreModel(gtab, radial_order=radial_order,
+                     zeta=zeta, lambdaN=lambdaN, lambdaL=lambdaL)
+    asmfit_iso = asm_iso.fit(S)
+
+    png = asmfit_iso.propagator_non_gaussianity()
+    assert_equal(png < 0.1 , True)
 
 if __name__ == '__main__':
     run_module_suite()
