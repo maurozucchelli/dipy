@@ -57,8 +57,8 @@ class ShoreModel(Cache):
                  gtab,
                  radial_order=6,
                  zeta=700,
-                 lambdaN=1e-8,
-                 lambdaL=1e-8,
+                 lambdaN=1e-7,
+                 lambdaL=1e-9,
                  positiveness=False):
         r""" Analytical and continuous modeling of the diffusion signal with
         respect to the SHORE basis [1,2]_.
@@ -184,10 +184,8 @@ class ShoreModel(Cache):
 
             c=matrix(-1*np.dot(M.T,data))
             h=matrix((1e-10)*np.ones((665)),(665,1))
-            #E=matrix(M[0],(1,M.shape[1]))
-            #d=matrix(data[0])
             solvers.options['show_progress'] = False
-            sol=solvers.qp(Q,c,G,h)#,E,d)
+            sol=solvers.qp(Q,c,G,h)
             coef=np.array(sol['x'])[:,0]
 
         else:
@@ -310,11 +308,11 @@ class ShoreFit():
             sharpening factor
 
         """
-        upsilon = self.model.cache_get('shore_matrix_odf', key=sphere)
+        upsilon = self.model.cache_get('shore_matrix_odf', key=(sphere,s))
         if upsilon is None:
-            upsilon = shore_matrix_odf(
-                self.radial_order,  self.zeta, sphere.vertices, s)
-            self.model.cache_set('shore_matrix_odf', sphere, upsilon)
+            upsilon = shore_matrix_odf(self.radial_order,  self.zeta,
+                                       sphere.vertices, s)
+            self.model.cache_set('shore_matrix_odf', (sphere,s), upsilon)
 
         odf = np.dot(upsilon, self._shore_coef)
         return odf
@@ -358,7 +356,7 @@ class ShoreFit():
 
         return rtop
 
-    def rtap(self, sphere):
+    def rtap(self, sphere, scalar_output=True):
         r""" Calculates the analytical return to axis probability (RTAP)
         from the pdf [1]_ in all the directions of the given sphere.
 
@@ -375,10 +373,14 @@ class ShoreFit():
             self.model.cache_set('shore_matrix_rtap', sphere, rtap_matrix)
 
         rtap = np.dot(rtap_matrix, self._shore_coef)
-        odf=self.odf(sphere) 
-        return rtap[odf.argmax()]
+        
+        if scalar_output:
+            odf = self.odf(sphere) 
+            rtap = rtap[odf.argmax()]
 
-    def rtpp(self, sphere):
+        return rtap
+
+    def rtpp(self, sphere, scalar_output=True):
         r""" Calculates the analytical return to plane probability (RTPP)
         from the pdf [1]_ in all the directions of the given sphere.
 
@@ -395,8 +397,12 @@ class ShoreFit():
             self.model.cache_set('shore_matrix_rtpp', sphere, rtpp_matrix)
 
         rtpp = np.dot(rtpp_matrix, self._shore_coef)
-        odf=self.odf(sphere) 
-        return rtpp[odf.argmax()]
+
+        if scalar_output:
+            odf = self.odf(sphere) 
+            rtpp = rtpp[odf.argmax()]
+
+        return rtpp
 
     def msd(self):
         r""" Calculates the analytical mean squared displacement (MSD) [1]_
@@ -424,54 +430,41 @@ class ShoreFit():
 
         return msd
 
-    def propagator_gaussianity(self, dissimilarity=False):
-        r""" Calculates the analytical mean squared displacement (MSD) [1]_
-
-        ..math::
-            :nowrap:
-                \begin{equation}
-                    MSD:{DSI}=\int_{-\infty}^{\infty}\int_{-\infty}^{\infty}\int_{-\infty}^{\infty} P(\hat{\mathbf{r}}) \cdot \hat{\mathbf{r}}^{2} \ dr_x \ dr_y \ dr_z
-                \end{equation}
-
-        where $\hat{\mathbf{r}}$ is a point in the 3D propagator space (see Wu et. al [1]_).
+    def propagator_non_gaussianity(self, dissimilarity=True):
+        r""" Calculates propagator non gaussianity [1]_.
 
         References
         ----------
-        .. [1] Wu Y. et. al, "Hybrid diffusion imaging", NeuroImage, vol 36,
-        p. 617-629, 2007.
+        .. [1] Ozarslan E. et. al, "Mean apparent propagator (MAP) MRI: A novel
+        diffusion imaging method for mapping tissue microstructure",
+        NeuroImage, 2013.
         """
         c = self._shore_coef
         costheta= c[0] / (np.sqrt((c**2).sum()))
         if dissimilarity:
-            g = np.sqrt(1 - costheta**2)
+            ng = np.sqrt(1 - costheta**2)
         else:
-            g = costheta
-        return g
+            ng = costheta
+        return ng
 
-    def propagator_isotropy(self, dissimilarity=False):
-        r""" Calculates the analytical mean squared displacement (MSD) [1]_
-
-        ..math::
-            :nowrap:
-                \begin{equation}
-                    MSD:{DSI}=\int_{-\infty}^{\infty}\int_{-\infty}^{\infty}\int_{-\infty}^{\infty} P(\hat{\mathbf{r}}) \cdot \hat{\mathbf{r}}^{2} \ dr_x \ dr_y \ dr_z
-                \end{equation}
-
-        where $\hat{\mathbf{r}}$ is a point in the 3D propagator space (see Wu et. al [1]_).
+    def propagator_anisotropy(self, dissimilarity=True):
+        r""" Calculates propagator anisotropy [1]_.
 
         References
         ----------
-        .. [1] Wu Y. et. al, "Hybrid diffusion imaging", NeuroImage, vol 36,
-        p. 617-629, 2007.
+        .. [1] Ozarslan E. et. al, "Mean apparent propagator (MAP) MRI: A novel
+        diffusion imaging method for mapping tissue microstructure",
+        NeuroImage, 2013.
         """
         c = self._shore_coef
         k = int(self.radial_order / 2) + 1
         costheta= (c[0:k]**2).sum() / ((np.sqrt((c[0:k]**2).sum())) * (np.sqrt((c**2).sum())))
         if dissimilarity:
-            g = np.sqrt(1 - costheta**2)
+            pa = np.sqrt(1 - costheta**2)
         else:
-            g = costheta
-        return g
+            pa = costheta
+        return pa
+
     @property
     def shore_coeff(self):
         """The SHORE coefficients
