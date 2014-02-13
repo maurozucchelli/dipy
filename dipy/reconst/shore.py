@@ -8,6 +8,7 @@ from scipy.special import genlaguerre, gamma, hyp2f1
 from dipy.core.geometry import cart2sphere
 from math import factorial
 from cvxopt import matrix, solvers
+import dipy.reconst.dti as dti
 
 class ShoreModel(Cache):
 
@@ -59,7 +60,8 @@ class ShoreModel(Cache):
                  zeta=700,
                  lambdaN=1e-7,
                  lambdaL=1e-9,
-                 positiveness=False):
+                 positiveness=False,
+                 adaptive_zeta=False):
         r""" Analytical and continuous modeling of the diffusion signal with
         respect to the SHORE basis [1,2]_.
         This implementation is a modification of SHORE presented in [1]_.
@@ -153,17 +155,30 @@ class ShoreModel(Cache):
         else:
             self.tau = gtab.big_delta - gtab.small_delta / 3.0
         self.positiveness=positiveness
+        self.adaptive_zeta=adaptive_zeta
+
+        if adaptive_zeta:
+
+
 
     @multi_voxel_fit
     def fit(self, data):
         Lshore = l_shore(self.radial_order)
         Nshore = n_shore(self.radial_order)
         # Generate the SHORE basis
-        M = self.cache_get('shore_matrix', key=self.gtab)
-        if M is None:
-            M = shore_matrix(self.radial_order,  self.zeta, self.gtab, self.tau)
-            self.cache_set('shore_matrix', self.gtab, M)
-
+        if not(self.adaptive_zeta):
+            M = self.cache_get('shore_matrix', key=self.gtab)
+            if M is None:
+                M = shore_matrix(self.radial_order,  self.zeta, self.gtab, self.tau)
+                self.cache_set('shore_matrix', self.gtab, M)
+        else:
+            ind=self.gtab.bvals<1000
+            gtab2 = gradient_table(gtab.bvals[ind], gtab.bvecs[ind,:])
+            tenmodel=dti.TensorModel(gtab2)
+            tenfit=tenmodel.fit(data[...,ind])
+            MD=dti.mean_diffusivity(tenfit.evals)
+            z=1/(8*np.pi**2 *self.tau*MD)
+            M = shore_matrix(self.radial_order,  z, self.gtab, self.tau)
         # Compute the signal coefficients in SHORE basis
         gridsize=11
 
@@ -850,9 +865,9 @@ def shore_order(n, l, m):
         raise ValueError(msg)
     else:
         if n % 2 == 1:
-            radial_order = n + 1
+            radial_order = 2*n + 1
         else:
-            radial_order = n
+            radial_order = 2*n
 
         counter_i  = 0
 
