@@ -157,9 +157,6 @@ class ShoreModel(Cache):
         self.positiveness=positiveness
         self.adaptive_zeta=adaptive_zeta
 
-        if adaptive_zeta:
-
-
 
     @multi_voxel_fit
     def fit(self, data):
