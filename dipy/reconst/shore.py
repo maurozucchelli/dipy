@@ -2,7 +2,7 @@ from __future__ import division
 import numpy as np
 from dipy.reconst.cache import Cache
 from dipy.reconst.multi_voxel import multi_voxel_fit
-from dipy.reconst.shm import real_sph_harm
+from dipy.reconst.shm import real_sph_harm, sh_to_sf
 from dipy.core.gradients import gradient_table
 from scipy.special import genlaguerre, gamma, hyp2f1
 from dipy.core.geometry import cart2sphere
@@ -60,8 +60,7 @@ class ShoreModel(Cache):
                  zeta=700,
                  lambdaN=1e-7,
                  lambdaL=1e-9,
-                 positiveness=False,
-                 adaptive_zeta=False):
+                 positiveness=False):
         r""" Analytical and continuous modeling of the diffusion signal with
         respect to the SHORE basis [1,2]_.
         This implementation is a modification of SHORE presented in [1]_.
@@ -147,15 +146,16 @@ class ShoreModel(Cache):
         else:
             msg = "radial_order must be a non-zero even positive number."
             raise ValueError(msg)
-        self.zeta = zeta
+        #self.zeta = zeta
         self.lambdaL = lambdaL
         self.lambdaN = lambdaN
         if (gtab.big_delta is None) or (gtab.small_delta is None):
-            self.tau = 1 / (4 * np.pi ** 2)
+            #self.tau = 1 / (4 * np.pi ** 2)
+            self.tau = 0.046
         else:
             self.tau = gtab.big_delta - gtab.small_delta / 3.0
         self.positiveness=positiveness
-        self.adaptive_zeta=adaptive_zeta
+
 
 
     @multi_voxel_fit
@@ -163,37 +163,28 @@ class ShoreModel(Cache):
         Lshore = l_shore(self.radial_order)
         Nshore = n_shore(self.radial_order)
         # Generate the SHORE basis
-        if not(self.adaptive_zeta):
-            M = self.cache_get('shore_matrix', key=self.gtab)
-            if M is None:
-                M = shore_matrix(self.radial_order,  self.zeta, self.gtab, self.tau)
-                self.cache_set('shore_matrix', self.gtab, M)
-        else:
-            ind=self.gtab.bvals<1000
-            gtab2 = gradient_table(gtab.bvals[ind], gtab.bvecs[ind,:])
-            tenmodel=dti.TensorModel(gtab2)
-            tenfit=tenmodel.fit(data[...,ind])
-            MD=dti.mean_diffusivity(tenfit.evals)
-            z=1/(8*np.pi**2 *self.tau*MD)
-            M = shore_matrix(self.radial_order,  z, self.gtab, self.tau)
+
+        ind=self.gtab.bvals<1300
+        gtab2 = gradient_table(self.gtab.bvals[ind], self.gtab.bvecs[ind,:])
+        tenmodel=dti.TensorModel(gtab2)
+        tenfit=tenmodel.fit(data[...,ind])
+        
+        MD=dti.mean_diffusivity(tenfit.evals)
+        z=1/(8*np.pi**2 *self.tau*MD)
+        z=np.clip(z,100,900)
+        M = shore_matrix(self.radial_order,  z, self.gtab, self.tau)
+        direction = tenfit.directions
         # Compute the signal coefficients in SHORE basis
         gridsize=11
 
         if self.positiveness:
             F = self.radial_order / 2
             n_c = np.round(1 / 6.0 * (F + 1) * (F + 2) * (4 * F + 3))
-            G = self.cache_get('shore_matrix_G', key=gridsize)
-            if G is None:
-                v,t = create_rspace(11, 20e-3)
-                psi = shore_matrix_pdf(self.radial_order,  self.zeta, t[:665])#2456])
-                G=matrix(-1*psi)
-                self.cache_set('shore_matrix_G', gridsize, G)
-
-            Q = self.cache_get('shore_matrix_Q', key=self.radial_order)
-            if Q is None:
-                Q=matrix(np.dot(M.T,M)+ self.lambdaN * Nshore + self.lambdaL * Lshore)
-                self.cache_set('shore_matrix_Q', self.radial_order, Q)
-
+            v,t = create_rspace(11, 20e-3)
+            psi = shore_matrix_pdf(self.radial_order,  z, t[:665])#2456])
+            G=matrix(-1*psi)
+            Q=matrix(np.dot(M.T,M)+ self.lambdaN * Nshore + self.lambdaL * Lshore)
+            self.cache_set('shore_matrix_Q', self.radial_order, Q)
             c=matrix(-1*np.dot(M.T,data))
             h=matrix((1e-10)*np.ones((665)),(665,1))
             solvers.options['show_progress'] = False
@@ -208,16 +199,16 @@ class ShoreModel(Cache):
 
         for n in range(int(self.radial_order / 2) + 1):
             signal_0 += coef[n] * genlaguerre(n, 0.5)(0) * \
-                ((factorial(n)) / (2 * np.pi * (self.zeta ** 1.5) * gamma(n + 1.5))) ** 0.5
+                ((factorial(n)) / (2 * np.pi * (z** 1.5) * gamma(n + 1.5))) ** 0.5
 
         coef = coef / signal_0
 
-        return ShoreFit(self, coef)
+        return ShoreFit(self, coef, z, direction)
 
 
 class ShoreFit():
 
-    def __init__(self, model, shore_coef):
+    def __init__(self, model, shore_coef, zeta, direction):
         """ Calculates diffusion properties for a single voxel
 
         Parameters
@@ -232,7 +223,8 @@ class ShoreFit():
         self._shore_coef = shore_coef
         self.gtab = model.gtab
         self.radial_order = model.radial_order
-        self.zeta = model.zeta
+        self.zeta = zeta
+        self.direction = direction
 
     def pdf_grid(self, gridsize, radius_max):
         r""" Applies the analytical FFT on $S$ to generate the diffusion
@@ -255,11 +247,7 @@ class ShoreFit():
         eap = np.zeros((gridsize, gridsize, gridsize))
         # Create the grid in which to compute the pdf
         rgrid, rtab = create_rspace(gridsize, radius_max)
-        psi = self.model.cache_get('shore_matrix_pdf', key=gridsize)
-        if psi is None:
-            psi = shore_matrix_pdf(self.radial_order,  self.zeta, rtab)
-            self.model.cache_set('shore_matrix_pdf', gridsize, psi)
-
+        psi = shore_matrix_pdf(self.radial_order,  self.zeta, rtab)
         propagator = np.dot(psi, self._shore_coef)
         # fill real space
         for i in range(len(rgrid)):
@@ -282,7 +270,7 @@ class ShoreFit():
 
         return eap
 
-    def odf_sh(self):
+    def odf_sh(self,s=0):
         r""" Calculates the real analytical ODF in terms of Spherical Harmonics.
         """
         # Number of Spherical Harmonics involved in the estimation
@@ -298,13 +286,16 @@ class ShoreFit():
 
                     j = int(l + m + (2 * np.array(range(0, l, 2)) + 1).sum())
 
-                    Cnl = ((-1) ** (n - l / 2)) / (2.0 * (4.0 * np.pi ** 2 * self.zeta) ** (3.0 / 2.0)) * ((2.0 * (
-                        4.0 * np.pi ** 2 * self.zeta) ** (3.0 / 2.0) * factorial(n - l)) / (gamma(n + 3.0 / 2.0))) ** (1.0 / 2.0)
-                    Gnl = (gamma(l / 2 + 3.0 / 2.0) * gamma(3.0 / 2.0 + n)) / (gamma(
-                        l + 3.0 / 2.0) * factorial(n - l)) * (1.0 / 2.0) ** (-l / 2 - 3.0 / 2.0)
-                    Fnl = hyp2f1(-n + l, l / 2 + 3.0 / 2.0, l + 3.0 / 2.0, 2.0)
+                    # Cnl = ((-1) ** (n - l / 2)) / (2.0 * (4.0 * np.pi ** 2 * self.zeta) ** (3.0 / 2.0)) * ((2.0 * (
+                    #     4.0 * np.pi ** 2 * self.zeta) ** (3.0 / 2.0) * factorial(n - l)) / (gamma(n + 3.0 / 2.0))) ** (1.0 / 2.0)
+                    # Gnl = (gamma(l / 2 + 3.0 / 2.0) * gamma(3.0 / 2.0 + n)) / (gamma(
+                    #     l + 3.0 / 2.0) * factorial(n - l)) * (1.0 / 2.0) ** (-l / 2 - 3.0 / 2.0)
+                    # Fnl = hyp2f1(-n + l, l / 2 + 3.0 / 2.0, l + 3.0 / 2.0, 2.0)
 
-                    c_sh[j] += self._shore_coef[counter] * Cnl * Gnl * Fnl
+                    upsilon= (-1) ** (n - l / 2.0) * np.sqrt((gamma(l / 2.0 +s/2.0+ 1.5) ** 2 * gamma(n + 1.5) * 2 ** (l +s+ 3)) /\
+                                        (16 * np.pi ** 3 * (self.zeta) ** 1.5 * factorial(n - l) * gamma(l + 1.5) ** 2 *(4*np.pi**2 *self.zeta)**s) ) *\
+                                        hyp2f1(l - n, l / 2.0 + 1.5 +s/2.0, l + 1.5, 2.0) 
+                    c_sh[j] += self._shore_coef[counter] * upsilon
                     counter += 1
 
         return c_sh
@@ -320,14 +311,13 @@ class ShoreFit():
             sharpening factor
 
         """
-        upsilon = self.model.cache_get('shore_matrix_odf', key=(sphere,s))
-        if upsilon is None:
-            upsilon = shore_matrix_odf(self.radial_order,  self.zeta,
-                                       sphere.vertices, s)
-            self.model.cache_set('shore_matrix_odf', (sphere,s), upsilon)
+        # upsilon = shore_matrix_odf(self.radial_order,  self.zeta,
+        #                                sphere.vertices, s)
 
-        odf = np.dot(upsilon, self._shore_coef)
-        return odf
+        # odf = np.dot(upsilon, self._shore_coef)
+
+
+        return sh_to_sf(self.odf_sh(s=s), sphere, self.radial_order)
 
     def rtop_signal(self):
         r""" Calculates the analytical return to origin probability (RTOP)
@@ -368,7 +358,7 @@ class ShoreFit():
 
         return rtop
 
-    def rtap(self, sphere, scalar_output=True):
+    def rtap(self):
         r""" Calculates the analytical return to axis probability (RTAP)
         from the pdf [1]_ in all the directions of the given sphere.
 
@@ -378,21 +368,26 @@ class ShoreFit():
         diffusion imaging method for mapping tissue microstructure",
         NeuroImage, 2013.
         """
-        rtap_matrix = self.model.cache_get('shore_matrix_rtap', key=sphere)
-        if rtap_matrix is None:
-            rtap_matrix = shore_matrix_rtap(self.radial_order,
-                                            self.zeta, sphere.vertices)
-            self.model.cache_set('shore_matrix_rtap', sphere, rtap_matrix)
+        r, theta, phi = cart2sphere(self.direction[0,0], self.direction[0,1],
+                                    self.direction[0,2])
+        F = self.radial_order / 2
+        n_c = np.round(1 / 6.0 * (F + 1) * (F + 2) * (4 * F + 3))
+        rtap_matrix = np.zeros(n_c)
+        counter = 0
+        for l in range(0, self.radial_order + 1, 2):
+            for n in range(l, int((self.radial_order + l) / 2) + 1):
+                for m in range(-l, l + 1):
+                    rtap_matrix[counter]= hyp2f1(l - n, l / 2.0 + 1.5, l + 1.5, 2.0) * \
+                        real_sph_harm(m, l, theta, phi) * ((-1)**(l/2))*(factorial(l)/((2* factorial(l/2))**2)) * \
+                        np.sqrt((self.zeta**1.5 * 2**l * 16* np.pi**2 * gamma(l/2 +1.5)**2 * gamma(n+1.5)) / (factorial(n-l) * gamma(l +1.5)**2 ))
+                    counter += 1
+
 
         rtap = np.dot(rtap_matrix, self._shore_coef)
         
-        if scalar_output:
-            odf = self.odf(sphere) 
-            rtap = rtap[odf.argmax()]
-
         return rtap
 
-    def rtpp(self, sphere, scalar_output=True):
+    def rtpp(self):
         r""" Calculates the analytical return to plane probability (RTPP)
         from the pdf [1]_ in all the directions of the given sphere.
 
@@ -402,18 +397,21 @@ class ShoreFit():
         diffusion imaging method for mapping tissue microstructure",
         NeuroImage, 2013.
         """
-        rtpp_matrix = self.model.cache_get('shore_matrix_rtpp', key=sphere)
-        if rtpp_matrix is None:
-            rtpp_matrix = shore_matrix_rtpp(self.radial_order,
-                                            self.zeta, sphere.vertices)
-            self.model.cache_set('shore_matrix_rtpp', sphere, rtpp_matrix)
-
+        r, theta, phi = cart2sphere(self.direction[0,0], self.direction[0,1],
+                                    self.direction[0,2])
+        F = self.radial_order / 2
+        n_c = np.round(1 / 6.0 * (F + 1) * (F + 2) * (4 * F + 3))
+        rtpp_matrix = np.zeros(n_c)
+        counter = 0
+        for l in range(0, self.radial_order + 1, 2):
+            for n in range(l, int((self.radial_order + l) / 2) + 1):
+                for m in range(-l, l + 1):
+                    rtpp_matrix[counter]= hyp2f1(l - n, l / 2.0 + 1.5, l + 1.5, 2.0) * \
+                        real_sph_harm(m, l, theta, phi) * \
+                        np.sqrt((self.zeta**1.5 * 2**l * 4* gamma(l/2 +1.5)**2 * gamma(n+1.5)) / (factorial(n-l) * gamma(l +1.5)**2 ))
+                    counter += 1
+        
         rtpp = np.dot(rtpp_matrix, self._shore_coef)
-
-        if scalar_output:
-            odf = self.odf(sphere) 
-            rtpp = rtpp[odf.argmax()]
-
         return rtpp
 
     def msd(self):
@@ -482,7 +480,11 @@ class ShoreFit():
         """The SHORE coefficients
         """
         return self._shore_coef
-
+    @property
+    def shore_zeta(self):
+        """The SHORE coefficients
+        """
+        return self.zeta
 
 def shore_matrix(radial_order, zeta, gtab, tau=1 / (4 * np.pi ** 2)):
     r"""Compute the SHORE matrix for modified Merlet's 3D-SHORE [1]_

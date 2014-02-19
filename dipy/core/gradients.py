@@ -68,7 +68,12 @@ class GradientTable(object):
         denom = self.bvals + (self.bvals == 0)
         denom = denom.reshape((-1, 1))
         return self.gradients / denom
-
+    @auto_attr
+    def big_delta(self):
+        return self.big_delta
+    @auto_attr
+    def small_delta(self):
+        return self.small_delta
     @property
     def info(self):
         print('B-values shape (%d,)' % self.bvals.shape)
@@ -232,7 +237,7 @@ def gradient_table(bvals, bvecs=None, big_delta=None, small_delta=None,
         bvecs = np.asarray(bvecs)
         if (bvecs.shape[1] > bvecs.shape[0])  and bvecs.shape[0]>1:
             bvecs = bvecs.T
-    return gradient_table_from_bvals_bvecs(bvals, bvecs, big_delta=None,
-                                           small_delta=None,
+    return gradient_table_from_bvals_bvecs(bvals, bvecs, big_delta=big_delta,
+                                           small_delta=small_delta,
                                            b0_threshold=b0_threshold,
                                            atol=1e-2)
