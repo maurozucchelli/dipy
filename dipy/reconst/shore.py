@@ -150,8 +150,8 @@ class ShoreModel(Cache):
         self.lambdaL = lambdaL
         self.lambdaN = lambdaN
         if (gtab.big_delta is None) or (gtab.small_delta is None):
-            #self.tau = 1 / (4 * np.pi ** 2)
-            self.tau = 0.046
+            self.tau = 1 / (4 * np.pi ** 2)
+            #self.tau = 0.046
         else:
             self.tau = gtab.big_delta - gtab.small_delta / 3.0
         self.positiveness=positiveness
@@ -171,7 +171,7 @@ class ShoreModel(Cache):
         
         MD=dti.mean_diffusivity(tenfit.evals)
         z=1/(8*np.pi**2 *self.tau*MD)
-        z=np.clip(z,100,900)
+        z=np.clip(z,10,5000)
         M = shore_matrix(self.radial_order,  z, self.gtab, self.tau)
         direction = tenfit.directions
         # Compute the signal coefficients in SHORE basis
@@ -194,6 +194,8 @@ class ShoreModel(Cache):
         else:
             pseudoInv = np.dot(np.linalg.inv(np.dot(M.T, M) + self.lambdaN * Nshore + self.lambdaL * Lshore), M.T)
             coef = np.dot(pseudoInv, data)
+        reconst=np.dot(M,coef)
+        error=np.sqrt(np.sum((data - reconst) ** 2)) / (data.sum())
 
         signal_0 = 0
 
@@ -203,12 +205,12 @@ class ShoreModel(Cache):
 
         coef = coef / signal_0
 
-        return ShoreFit(self, coef, z, direction)
+        return ShoreFit(self, coef, z, direction,error)
 
 
 class ShoreFit():
 
-    def __init__(self, model, shore_coef, zeta, direction):
+    def __init__(self, model, shore_coef, zeta, direction, error):
         """ Calculates diffusion properties for a single voxel
 
         Parameters
@@ -225,6 +227,7 @@ class ShoreFit():
         self.radial_order = model.radial_order
         self.zeta = zeta
         self.direction = direction
+        self.error=error
 
     def pdf_grid(self, gridsize, radius_max):
         r""" Applies the analytical FFT on $S$ to generate the diffusion
@@ -485,7 +488,11 @@ class ShoreFit():
         """The SHORE coefficients
         """
         return self.zeta
-
+    @property
+    def shore_error(self):
+        """The SHORE coefficients
+        """
+        return self.error
 def shore_matrix(radial_order, zeta, gtab, tau=1 / (4 * np.pi ** 2)):
     r"""Compute the SHORE matrix for modified Merlet's 3D-SHORE [1]_
 
