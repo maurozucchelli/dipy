@@ -172,6 +172,7 @@ class ShoreModel(Cache):
         MD=dti.mean_diffusivity(tenfit.evals)
         z=1/(8*np.pi**2 *self.tau*MD)
         z=np.clip(z,10,5000)
+        #z=700
         M = shore_matrix(self.radial_order,  z, self.gtab, self.tau)
         direction = tenfit.directions
         # Compute the signal coefficients in SHORE basis
