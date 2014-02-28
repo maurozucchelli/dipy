@@ -277,7 +277,7 @@ class ShoreFit():
 
         return eap
 
-    def odf_sh(self):
+    def odf_sh(self,s=0):
         r""" Calculates the real analytical ODF in terms of Spherical Harmonics.
         """
         # Number of Spherical Harmonics involved in the estimation
@@ -290,16 +290,11 @@ class ShoreFit():
         for l in range(0, self.radial_order + 1, 2):
             for n in range(l, int((self.radial_order + l) / 2) + 1):
                 for m in range(-l, l + 1):
-
                     j = int(l + m + (2 * np.array(range(0, l, 2)) + 1).sum())
-
-                    Cnl = ((-1) ** (n - l / 2)) / (2.0 * (4.0 * np.pi ** 2 * self.zeta) ** (3.0 / 2.0)) * ((2.0 * (
-                        4.0 * np.pi ** 2 * self.zeta) ** (3.0 / 2.0) * factorial(n - l)) / (gamma(n + 3.0 / 2.0))) ** (1.0 / 2.0)
-                    Gnl = (gamma(l / 2 + 3.0 / 2.0) * gamma(3.0 / 2.0 + n)) / (gamma(
-                        l + 3.0 / 2.0) * factorial(n - l)) * (1.0 / 2.0) ** (-l / 2 - 3.0 / 2.0)
-                    Fnl = hyp2f1(-n + l, l / 2 + 3.0 / 2.0, l + 3.0 / 2.0, 2.0)
-
-                    c_sh[j] += self._shore_coef[counter] * Cnl * Gnl * Fnl
+                    upsilon= (-1) ** (n - l / 2.0) * np.sqrt((gamma(l / 2.0 +s/2.0+ 1.5) ** 2 * gamma(n + 1.5) * 2 ** (l +s+ 3)) /\
+                                        (16 * np.pi ** 3 * (self.zeta) ** 1.5 * factorial(n - l) * gamma(l + 1.5) ** 2 *(4*np.pi**2 *self.zeta)**s) ) *\
+                                        hyp2f1(l - n, l / 2.0 + 1.5 +s/2.0, l + 1.5, 2.0)
+                    c_sh[j] += self._shore_coef[counter] * upsilon
                     counter += 1
 
         return c_sh
