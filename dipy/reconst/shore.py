@@ -192,6 +192,9 @@ class ShoreModel(Cache):
             pseudoInv = np.dot(np.linalg.inv(np.dot(M.T, M) + self.lambdaN * Nshore + self.lambdaL * Lshore), M.T)
             coef = np.dot(pseudoInv, data)
 
+        reconst=np.dot(M,coef)
+        error=np.sum((data - reconst) ** 2) / (data.sum())**2
+
         signal_0 = 0
 
         for n in range(int(self.radial_order / 2) + 1):
@@ -200,12 +203,12 @@ class ShoreModel(Cache):
 
         coef = coef / signal_0
 
-        return ShoreFit(self, coef)
+        return ShoreFit(self, coef, error)
 
 
 class ShoreFit():
 
-    def __init__(self, model, shore_coef):
+    def __init__(self, model, shore_coef, error):
         """ Calculates diffusion properties for a single voxel
 
         Parameters
@@ -221,6 +224,7 @@ class ShoreFit():
         self.gtab = model.gtab
         self.radial_order = model.radial_order
         self.zeta = model.zeta
+        self.error = error
 
     def pdf_grid(self, gridsize, radius_max):
         r""" Applies the analytical FFT on $S$ to generate the diffusion
@@ -473,6 +477,11 @@ class ShoreFit():
         """
         return self._shore_coef
 
+    @property
+    def shore_error(self):
+        """The SHORE reconstruction error
+        """
+        return self.error
 
 def shore_matrix(radial_order, zeta, gtab, tau=1 / (4 * np.pi ** 2)):
     r"""Compute the SHORE matrix for modified Merlet's 3D-SHORE [1]_
