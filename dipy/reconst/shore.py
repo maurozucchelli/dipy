@@ -385,6 +385,29 @@ class ShoreFit():
             rtap = rtap[odf.argmax()]
 
         return rtap
+    def rtap2(self, sphere, scalar_output=True):
+        r""" Calculates the analytical return to axis probability (RTAP)
+        from the pdf [1]_ in all the directions of the given sphere.
+
+        References
+        ----------
+        .. [1] Ozarslan E. et. al, "Mean apparent propagator (MAP) MRI: A novel
+        diffusion imaging method for mapping tissue microstructure",
+        NeuroImage, 2013.
+        """
+        rtap_matrix = self.model.cache_get('shore_matrix_rtap2', key=sphere)
+        if rtap_matrix is None:
+            rtap_matrix = shore_matrix_odf(self.radial_order,
+                                            self.zeta, sphere.vertices, s=-2)
+            self.model.cache_set('shore_matrix_rtap2', sphere, rtap_matrix)
+
+        rtap = np.dot(rtap_matrix, self._shore_coef)
+        
+        if scalar_output:
+            odf = self.odf(sphere) 
+            rtap = rtap[odf.argmax()]
+
+        return rtap
 
     def rtpp(self, sphere, scalar_output=True):
         r""" Calculates the analytical return to plane probability (RTPP)
@@ -636,6 +659,7 @@ def shore_matrix_odf(radial_order, zeta, sphere_vertices, s=0):
 
     return upsilon
 
+
 def shore_matrix_rtap(radial_order, zeta, sphere_vertices):
     r"""Compute the SHORE ODF matrix [1]_"
 
@@ -701,9 +725,9 @@ def shore_matrix_rtpp(radial_order, zeta, sphere_vertices):
     for l in range(0, radial_order + 1, 2):
         for n in range(l, int((radial_order + l) / 2) + 1):
             for m in range(-l, l + 1):
-                rtpp_matrix[:,counter]= hyp2f1(l - n, l / 2.0 + 1.5, l + 1.5, 2.0) * \
+                rtpp_matrix[:,counter]= hyp2f1(l - n, l / 2.0 + 0.5, l + 1.5, 2.0) * \
                     real_sph_harm(m, l, theta, phi) * \
-                    np.sqrt((zeta**1.5 * 2**l * 4* gamma(l/2 +1.5)**2 * gamma(n+1.5)) / (factorial(n-l) * gamma(l +1.5)**2 ))
+                    np.sqrt((2**l * gamma(l/2 +0.5)**2 * gamma(n+1.5)) / (zeta**0.5 * factorial(n-l) * gamma(l +1.5)**2 ))
                 counter += 1
 
     return rtpp_matrix
