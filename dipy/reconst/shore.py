@@ -689,9 +689,9 @@ def shore_matrix_rtap(radial_order, zeta, sphere_vertices):
     for l in range(0, radial_order + 1, 2):
         for n in range(l, int((radial_order + l) / 2) + 1):
             for m in range(-l, l + 1):
-                rtap_matrix[:,counter]= hyp2f1(l - n, l / 2.0 + 1.5, l + 1.5, 2.0) * \
-                    real_sph_harm(m, l, theta, phi) * ((-1)**(l/2))*(factorial(l)/((2* factorial(l/2))**2)) * \
-                    np.sqrt((zeta**1.5 * 2**l * 16* np.pi**2 * gamma(l/2 +1.5)**2 * gamma(n+1.5)) / (factorial(n-l) * gamma(l +1.5)**2 ))
+                rtap_matrix[:,counter]= hyp2f1(l - n, l / 2.0 + 1, l + 1.5, 2.0) * \
+                    real_sph_harm(m, l, theta, phi) * ((-1)**(l/2))*((np.prod(np.arange(1,l,2)))/np.prod(np.arange(2,l+1,2))) * \
+                    np.sqrt(( zeta**0.5* 2**(l+3) *  np.pi**2 * gamma(l/2 +1)**2 * gamma(n+1.5)) / ( factorial(n-l) * gamma(l +1.5)**2 ))
                 counter += 1
 
     return rtap_matrix
