@@ -165,7 +165,7 @@ class ShoreModel(Cache):
             self.cache_set('shore_matrix', self.gtab, M)
 
         # Compute the signal coefficients in SHORE basis
-        gridsize=11
+        gridsize=35
         lg=int(gridsize**3/2)
 
         if self.positiveness:
@@ -174,7 +174,7 @@ class ShoreModel(Cache):
             G = self.cache_get('shore_matrix_G', key=gridsize)
             if G is None:
 
-                v,t = create_rspace(gridsize, 20e-3)
+                v,t = create_rspace(gridsize, 25e-3)
                 psi = shore_matrix_pdf(self.radial_order,  self.zeta, t[:lg])#2456])
                 G=matrix(-1*psi)
                 self.cache_set('shore_matrix_G', gridsize, G)
