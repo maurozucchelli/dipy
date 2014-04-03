@@ -59,7 +59,8 @@ class ShoreModel(Cache):
                  zeta=700,
                  lambdaN=1e-7,
                  lambdaL=1e-9,
-                 positiveness=False):
+                 positiveness=False,
+                 gridsize=11):
         r""" Analytical and continuous modeling of the diffusion signal with
         respect to the SHORE basis [1,2]_.
         This implementation is a modification of SHORE presented in [1]_.
@@ -153,7 +154,7 @@ class ShoreModel(Cache):
         else:
             self.tau = gtab.big_delta - gtab.small_delta / 3.0
         self.positiveness=positiveness
-
+        self.gridsize=gridsize
     @multi_voxel_fit
     def fit(self, data):
         Lshore = l_shore(self.radial_order)
@@ -165,7 +166,7 @@ class ShoreModel(Cache):
             self.cache_set('shore_matrix', self.gtab, M)
 
         # Compute the signal coefficients in SHORE basis
-        gridsize=35
+        gridsize=self.gridsize
         lg=int(gridsize**3/2)
 
         if self.positiveness:
@@ -202,7 +203,7 @@ class ShoreModel(Cache):
         for n in range(int(self.radial_order / 2) + 1):
             signal_0 += coef[n] * genlaguerre(n, 0.5)(0) * \
                 ((factorial(n)) / (2 * np.pi * (self.zeta ** 1.5) * gamma(n + 1.5))) ** 0.5
-
+        print('signal 0: %f' % signal_0)
         coef = coef / signal_0
 
         return ShoreFit(self, coef, error)
