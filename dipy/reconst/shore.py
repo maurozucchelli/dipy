@@ -164,10 +164,10 @@ class ShoreModel(Cache):
         Nshore = n_shore(self.radial_order)
         # Generate the SHORE basis
 
-        ind=self.gtab.bvals<1300
+        ind=self.gtab.bvals<1500
         gtab2 = gradient_table(self.gtab.bvals[ind], self.gtab.bvecs[ind,:])
         tenmodel=dti.TensorModel(gtab2)
-        tenfit=tenmodel.fit(data[...,ind])
+        tenfit=tenmodel.fit(data[...,ind]*100)
         
         MD=dti.mean_diffusivity(tenfit.evals)
         z=1/(8*np.pi**2 *self.tau*MD)
@@ -203,7 +203,7 @@ class ShoreModel(Cache):
         for n in range(int(self.radial_order / 2) + 1):
             signal_0 += coef[n] * genlaguerre(n, 0.5)(0) * \
                 ((factorial(n)) / (2 * np.pi * (z** 1.5) * gamma(n + 1.5))) ** 0.5
-
+        print(signal_0)
         coef = coef / signal_0
 
         return ShoreFit(self, coef, z, direction,error)
@@ -381,9 +381,12 @@ class ShoreFit():
         for l in range(0, self.radial_order + 1, 2):
             for n in range(l, int((self.radial_order + l) / 2) + 1):
                 for m in range(-l, l + 1):
-                    rtap_matrix[counter]= hyp2f1(l - n, l / 2.0 + 1.5, l + 1.5, 2.0) * \
-                        real_sph_harm(m, l, theta, phi) * ((-1)**(l/2))*(factorial(l)/((2* factorial(l/2))**2)) * \
-                        np.sqrt((self.zeta**1.5 * 2**l * 16* np.pi**2 * gamma(l/2 +1.5)**2 * gamma(n+1.5)) / (factorial(n-l) * gamma(l +1.5)**2 ))
+                    rtap_matrix[counter]=hyp2f1(l - n, l / 2.0 + 1, l + 1.5, 2.0) * \
+                    real_sph_harm(m, l, theta, phi) * ((-1)**(l/2))*((np.prod(np.arange(1,l,2)))/np.prod(np.arange(2,l+1,2))) * \
+                    np.sqrt(( self.zeta**0.5* 2**(l+3) * np.pi**2 * gamma(l/2 +1)**2 * gamma(n+1.5)) / ( factorial(n-l) * gamma(l +1.5)**2 ))
+                    # rtap_matrix[counter]= hyp2f1(l - n, l / 2.0 + 1.5, l + 1.5, 2.0) * \
+                    #     real_sph_harm(m, l, theta, phi) * ((-1)**(l/2))*(factorial(l)/((2* factorial(l/2))**2)) * \
+                    #     np.sqrt((self.zeta**1.5 * 2**l * 16* np.pi**2 * gamma(l/2 +1.5)**2 * gamma(n+1.5)) / (factorial(n-l) * gamma(l +1.5)**2 ))
                     counter += 1
 
 
@@ -410,13 +413,13 @@ class ShoreFit():
         for l in range(0, self.radial_order + 1, 2):
             for n in range(l, int((self.radial_order + l) / 2) + 1):
                 for m in range(-l, l + 1):
-                    rtpp_matrix[counter]= hyp2f1(l - n, l / 2.0 + 1.5, l + 1.5, 2.0) * \
-                        real_sph_harm(m, l, theta, phi) * \
-                        np.sqrt((self.zeta**1.5 * 2**l * 4* gamma(l/2 +1.5)**2 * gamma(n+1.5)) / (factorial(n-l) * gamma(l +1.5)**2 ))
+                    rtpp_matrix[counter]=  hyp2f1(l - n, l / 2.0 + 0.5, l + 1.5, 2.0) * \
+                    real_sph_harm(m, l, theta, phi) * \
+                    np.sqrt((2**l * gamma(l/2 +0.5)**2 * gamma(n+1.5)) / (self.zeta**0.5 * factorial(n-l) * gamma(l +1.5)**2 ))
                     counter += 1
         
         rtpp = np.dot(rtpp_matrix, self._shore_coef)
-        return rtpp
+        return rtpp*2
 
     def msd(self):
         r""" Calculates the analytical mean squared displacement (MSD) [1]_
